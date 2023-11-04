@@ -75,6 +75,7 @@ def find_peaks_harmonics(y, threshold, f):
       harmonics = np.r_[harmonics, harm]
       main_peaks = np.r_[main_peaks, peak]
   return peaks, harmonics, main_peaks
+  
 #%% ===============================================================
 # import data
 # =================================================================
