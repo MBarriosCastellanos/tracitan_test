@@ -16,66 +16,6 @@ import seaborn as sns
 #%% ===============================================================
 # functions
 # =================================================================
-def dft(X, fr):
-  ''' get a fft from a matrix of data X, 
-  row measurement, columns sensors
-  X = amplitude matrix on time domain
-  dt = sampling frequency
-  '''
-  n = len(X)                          # quanttity of data
-  fourier = fft(X, axis=0)[0:n//2, :] # amplitude fourier transform
-  Xf = 2.0/n*np.abs(fourier)          # amplitude
-  Xf[:5] = 0                          # take off first values
-  f = fftfreq(n, 1/fr)[0:n//2]        # frequency values
-  return f, Xf
-def plot_vib(df, haxis,  name = '', start = time.time(),
-    xlabel ='time [s]', case='time'):
-  ''' Function to plot vibration in time or frequency '''
-  # get time -----------------------------------------------------
-  dt_object = datetime.datetime.fromtimestamp(start)
-  date_time = dt_object.strftime('%Y-%m-%d %H:%M:%S')
-
-  # change the y limits based on case ----------------------------
-  if case=='time':
-    max_df = np.max(np.array(np.abs(df)))*1.05
-    min_df = - max_df
-  else:
-    max_df = np.array(df).max()*1
-    min_df = 0
-
-  # plot ---------------------------------------------------------
-  fig, axs = plt.subplots(df.shape[1], 1, sharex=True)
-  fig.suptitle('sensor %s, on %s'%(name, date_time))
-  for ax, col in zip(axs, df.columns):
-    vib = np.array(df[col])
-    ax.plot(haxis, vib, color='k', )
-    ax.set_ylabel('%s [$\\mathrm{m^2/s}$]'%(col))
-    ax.set_xlim(haxis.min(), haxis.max())
-    ax.set_ylim(min_df, max_df)
-  ax.set_xlabel(xlabel)
-  fig.tight_layout()
-  return fig, axs
-RMS = lambda x: (np.sum(x**2, axis=0)/x.shape[0])**0.5
-def find_peaks_harmonics(y, threshold, f):
-  '''function to find the peaks over the selected threshold
-  and find the harmonics in this peaks
-  '''
-  peaks = find_peaks(y, threshold)[0]   # find the peaks over threshold
-  harmonics = np.array([], dtype=int)   # store the harmonics
-  main_peaks = np.array([], dtype=int)  # store mean frequencies 
-  # after the middle of spectrum there is no possible harmonics
-  peaks_eval = peaks[peaks<(len(f)//2 + 1)] 
-  for peak in peaks_eval:
-    if np.isin(peak, harmonics): 
-      pass        # pass frequencies on the harmonics 
-    elif sum(peaks%peak==0)>1:
-      harm = peaks[peaks%peak==0]
-      print('main freq = %.2f  [Hz] presents %s harmonics'%(
-        f[peak], len(harm)
-      ))
-      harmonics = np.r_[harmonics, harm]
-      main_peaks = np.r_[main_peaks, peak]
-  return peaks, harmonics, main_peaks
 
 #%% ===============================================================
 # import data
@@ -86,7 +26,6 @@ collects = pd.read_csv(collects_path)
 assets = pd.read_csv(assets_path)
 assets.index = [assets['sensors'][i][2:-2] for i in assets.index]
 
-
 #%% ===============================================================
 # data preprocessing
 # =================================================================
@@ -95,7 +34,7 @@ collects = collects[~collects['params.accelRMS.x'].isna()]
 collects.index = range(len(collects))
 sensors = np.unique(collects['sensorId'])
 # ------------------------------------------------------------------
-'''some equipemnts the conventional horizontal, vertical axial 
+'''some equipments the conventional horizontal, vertical axial 
 directions not apply. However convenience for analysis will 
 standardized.
  '''
@@ -139,6 +78,8 @@ df['vel_RMS'] = df.loc[:,
   ['vel_RMS_' + d for d in directions]].sum(axis=1)/3
 df['accel_RMS'] = df.loc[:,
   ['accel_RMS_' + d for d in directions]].sum(axis=1)/3
+df = df.sort_values(by=['sensorId', 'time_start'])
+df.index = range(len(df))
 
 #%% ===============================================================
 # Present data
@@ -151,7 +92,6 @@ for sensor in sensors:
   fig, axs = plt.subplots(4, 1, sharex=True)
   ax2 = [0, 0, 0]
   fig.suptitle(assets['name'][sensor])
-  #for i, kind in enumerate(['accel_RMS_', 'vel_RMS_']):
   for j, d in enumerate(directions):
     axs[j].plot(t, dfi['accel_RMS_' + d], color='g')
     ax2[j] = axs[j].twinx()
@@ -160,182 +100,199 @@ for sensor in sensors:
     ax2[j].set_ylabel(lab1[1] + '\n' + lab2[j], color='b')
   axs[3].plot(t, dfi['temp'], color='gray', label='measure')
   if np.mean(dfi.temp_max)>0:
-    axs[3].plot(t, dfi['temp_max'], label='limite', color='r')
+    axs[3].plot(t, dfi['temp_max'], label='limit', color='r')
   axs[3].set_ylabel('temperature')
   axs[3].legend()
   fig.tight_layout()
   
 #%% ===============================================================
-# labeling data
-# =================================================================
-df['class'] = 1
+# labeling data 0 for downtime and 1 for uptime
 # =================================================================
 for j, sensor in enumerate(sensors):
-  fig, ax = plt.subplots(3, 1)
-  dfi = df[df['sensorId']==sensor]
+  # define data of each sensor ------------------------------------
+  dfi = df[df['sensorId']==sensor].copy()
   index = dfi.index
-  fig.suptitle(('%s, %s'%(
-    assets['name'][sensor], assets['modelType'][sensor]
-  )))
-  # axis 0
-  ax0 = ax[0].twinx()
-  th = 2.1e-2 if j!=3 else 1e-2
-  th = th if j!=9 else 3e-2
-  th = th if j!=1 else 1.2e-2
-  th = th if j!=2 else 1.9e-2
-  dfi['class'] = 0*(dfi['accel_RMS']<th) + 1*(dfi['accel_RMS']>th)
-  df.loc[index, 'class'] = np.array(dfi['class'])
-  sns.scatterplot(dfi, x='accel_RMS', y='time_start', hue='class', ax =ax0)
-  sns.kdeplot(dfi['accel_RMS'], ax =ax[0])
-  ax[0].set_xscale('log')
-  
-  # axis 1
-  ax1 = ax[1].twinx()
-  
-  sns.scatterplot(dfi, x='vel_RMS', y='time_start', hue='class', ax =ax1)
-  ax[1].set_xscale('log')
-  
-  # axis 2
-  ax2 = ax[2].twinx()
-  dtime = np.array(dfi.time_start[1:]) - np.array(dfi.time_start[:-1])
-  sns.kdeplot(dtime, ax =ax[2])
-  sns.scatterplot(x=dtime,y=dfi.time_start[:-1])
-  ax2.vlines(1e4,dfi['time_start'].min(), 
+  title = '%s, %s'%(
+    assets['name'][sensor], assets['modelType'][sensor])
+  dtime = np.array(dfi.time_start[1:]
+    ) - np.array(dfi.time_start[:-1])
+  dfi['dt'] = np.r_[dtime, dtime[-1]]
+
+  # labeling the data of corresponding sensor threshold  -----------
+  th_values = {1: 1.2e-2, 2: 1.9e-2, 3: 1e-2, 9: 3e-2}
+  th = th_values.get(j, 2.1e-2) # threshold
+
+  vib_acel = np.array(dfi['accel_RMS'])
+  dfi['class']           = 0*(vib_acel<th) + 1*(vib_acel>th)
+  df.loc[index, 'class'] = 0*(vib_acel<th) + 1*(vib_acel>th)
+
+  # plot the view of classification -------------------------------
+  fig, axs = plt.subplots(4, 1, figsize=(6, 10))
+  ax_0 = list(axs)
+  ax_1 = [0, 0, 0]
+  fig.suptitle(title)
+
+  # axis 0 a 2 
+  labels = ['accel_RMS', 'vel_RMS', 'dt']
+  for i in range(3):
+    ax_1[i] = ax_0[i].twinx()
+    sns.scatterplot(dfi, alpha=0.4,
+      x=labels[i], y='time_start', hue='class', ax =ax_0[i])
+    sns.kdeplot(dfi[labels[i]], ax =ax_1[i], color='k')
+    #if i<2:
+    ax_1[i].set_xscale('log')
+  ax_0[2].vlines(1e4,dfi['time_start'].min(), 
     dfi['time_start'].max(), color='r')
-
-
-  fig, ax = plt.subplots()
-  ax.plot(dfi.time_start[dfi['class']==0], 
-    dfi.accel_RMS[dfi['class']==0],'.', color='r')
-  ax.plot(dfi.time_start[dfi['class']==1], 
-    dfi.accel_RMS[dfi['class']==1], color='k')
+  
+  # axis 3
+  for Class, color  in enumerate(['r', 'k']):
+    ax_0[3].plot(dfi.time_start[dfi['class']==Class], 
+      dfi.accel_RMS[dfi['class']==Class],'--', color=color)
   fig.tight_layout()
   
-
-
 #%% ===============================================================
-# classification decision tree
+# classification decision tree for downtime and uptime asset
 # =================================================================
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.tree import export_text
-columns = [
-  'vel_RMS', 'vel_RMS_h', 'vel_RMS_v', 'vel_RMS_a',
-  'accel_RMS', 'accel_RMS_h', 'accel_RMS_v', 'accel_RMS_a', 
-  'model_type',
-  'rpm', 'power'
-]
+from sklearn.metrics import confusion_matrix
+# select features
+columns = ['vel_RMS', 'accel_RMS', 'model_type','rpm']
 X = np.array(df.loc[:, columns])
 y = np.array(df.loc[:, 'class'])
-# Split the data into training and testing sets
+
+# Split the data into training and testing sets -------------------
 X_train, X_test, y_train, y_test = train_test_split(
-  X, y, test_size=0.3, random_state=21)
+  X, y, test_size=0.5, random_state=21)
 
-# Create a Decision Tree Classifier
-clf = DecisionTreeClassifier(random_state=21,
-  max_leaf_nodes=4)
-
-# Train the classifier on the training data
+# Create and train a Decision Tree Classifier ---------------------
+clf = DecisionTreeClassifier(random_state=21)
 clf.fit(X_train, y_train)
 
-# Make predictions on the test data
+# Make predictions on the train and test data set -----------------
+y_pred_tr = clf.predict(X_train)
 y_pred = clf.predict(X_test)
 
-# Evaluate the model's accuracy
+# Evaluate the model's accuracy -----------------------------------
+accuracy_tr = accuracy_score(y_train, y_pred_tr)
 accuracy = accuracy_score(y_test, y_pred)
-print("Accuracy:", accuracy)
+print("Accuracy train:", accuracy_tr)
+print("Accuracy test:", accuracy)
+print("Number of leaf nodes:", clf.get_n_leaves())
 
 # Export the Decision Tree to a text-based representation
 tree_text = export_text(clf, feature_names=columns)
-
-# Print the Decision Tree structure on the screen
 print(tree_text)
+
+# Create a confusion matrix
+cm = confusion_matrix(y_test, y_pred)
+lab = ['downtime', 'uptime']
+sns.heatmap(cm, annot=True, fmt='d', cmap='Greys', 
+  cbar=False, xticklabels=lab, yticklabels=lab)
+plt.xlabel('Predicted');  plt.ylabel('Actual'); plt.show()
+
+
 #%% ===============================================================
-# add some statistics for next analisys
+# function to predict downtime and uptime
 # =================================================================
-windows_size
-df['mean'] = df['accel_RMS_vertical'].rolling(window=20, min_periods=1).mean()
-df['var'] = df['accel_RMS_vertical'].rolling(window=20, min_periods=1).var()
-df['accel_RMS_vertical'].rolling(window=20, min_periods=1).cov(df['accel_RMS_vertical'])
-df['accel_RMS_vertical'].rolling(window=20).corr(df['accel_RMS_vertical'])
+def calculate_dw_up(df, sensor):
+  '''calculate the downtime and uptime in dataframe df for the 
+  equipment measured by the sensor  
+  '''
+  # get delta times between vibration measurement 
+  dfi = df[df['sensorId']==sensor].copy() # select sensor data
+  dfi = dfi.sort_values(by='time_start').copy() # ensure order
+  dtimes = np.array(dfi.time_start[1:]    # get delta times
+    ) - np.array(dfi.time_start[:-1])
+  last_dt = df['duration'].iloc[-1]       # add dtime last 
+  dtimes = np.r_[dtimes,  last_dt]        #     measurement
 
+  # predict downtime or uptime in each measurement 
+  columns = ['vel_RMS', 'accel_RMS', 'model_type','rpm']
+  class_pred = clf.predict(np.array(dfi.loc[:, columns]))
 
-#%%
-for column in collects.columns:
-  l = len(np.unique(collects.loc[:,column])) 
-  print(column, l)
-print('assets ===============================================')
-for column in assets.columns[1:]:
-  try:
-    l = len(np.unique(assets.loc[:,column]) )
-    print(column, l)
-  except:
-    print(column, 'fail')
-
-
-  #print(assets[column])
-#%% ===============================================================
-# first view
-# =================================================================
-sensors = np.unique(collects['sensorId'])
+  # calculate the operation time, downtime, and uptime in seconds 
+  total_time = dfi.time_start.max() - dfi.time_start.min() + last_dt
+  uptime   = np.sum(dtimes*(class_pred==1))
+  downtime = np.sum(dtimes*(class_pred==0))
+  return downtime, uptime, total_time
+# -----------------------------------------------------------------
+# predict times for each machine
+# -----------------------------------------------------------------
+msgs = ['total operation time = ', 'downtime = ', 'uptime = ']
 for sensor in sensors:
-  df = collects[collects['sensorId']==sensor]
-  #df = collects
-  t = np.array(df['params.timeStart'])
-  x = np.array(df['params.accelRMS.x'])
-  y = np.array(df['params.accelRMS.y'])
-  z = np.array(df['params.accelRMS.z'])
-  acel = x + y + z
-  xvel = np.array(df['params.velRMS.x'])
-  yvel = np.array(df['params.velRMS.y'])
-  zvel = np.array(df['params.velRMS.z'])
-  vel = xvel + yvel + zvel
-  temp = np.array(df['temp'])
-  i = np.argsort(t)
-  t = (t - np.nanmin(t))
-  plt.title((assets['name'][sensor], 
-    assets['specifications.maxDowntime'][sensor],
-    assets['modelType'][sensor],
-    assets['specifications.rpm'][sensor]
-    ))
-  #plt.plot(t[i], acel[i]/3, '.')
-  #plt.hlines(1.3e-2, np.nanmin(t), np.nanmax(t), color='r')
-  j = (acel[i]/3)>(1.3e-2)
-  #plt.plot(t[i], temp[i], '-')
-  plt.plot(t[i][j], x[i][j], '.')
-  plt.plot(t[i][j], y[i][j], '.')
-  plt.plot(t[i][j], z[i][j], '.')
-  #plt.plot(t[i][j], yvel[i][j], '.')
-  #plt.plot(t[i][j], zvel[i][j], '.')
-  #plt.loglog(t[i][j], z[i][j], '.')
+  # define data of each sensor 
+  machine = assets['name'][sensor], 
+  mtype = assets['modelType'][sensor]
+  maxdw = assets['specifications.maxDowntime'][sensor]
 
-  #plt.hlines(2e-3, np.nanmin(t), np.nanmax(t), color='r')
-  plt.yscale('log')
-  #plt.plot(sorted(t), '.')
+  # calculate downtime and uptime
+  downtime, uptime, total_time = calculate_dw_up(df, sensor)
+  print((' %s '%(machine)).center(65, '█'))
+  print('machine type : ', mtype)
+  print('maximum downtime : ', maxdw)
+  times = [total_time, downtime, uptime]
+  for msg, time in zip(msgs, times):
+    time_formated = str(datetime.timedelta(seconds=time))
+    print(msg, time_formated)
+
+
+#%% ===============================================================
+# add moving to predict changes in vibration patterns
+# =================================================================
+# add mean average for each vibration signal:
+signals_a = ['accel_RMS_' + i for i in ['h', 'v', 'a']]
+signals_v = ['vel_RMS_' + i for i in ['h', 'v', 'a']]
+signals = signals_a + signals_v
+signals
+df_an = df[df['class']==1].copy()
+for j, sensor in enumerate(sensors):
+  # define data of each sensor ------------------------------------
+  dfi = df_an[df_an['sensorId']==sensor].copy()
+  index = dfi.index
+  title = '%s, %s'%(
+    assets['name'][sensor], assets['modelType'][sensor])
+
+  # ----
+  for signal in signals:
+    df_an.loc[index, signal + '_mean'] = dfi[signal].rolling(
+      window=40, min_periods=1).mean()
+    df_an.loc[index, signal + '_std'] = dfi[signal].rolling(
+      window=40, min_periods=1).std()
+    df_an.loc[index, signal + '_min'] = dfi[signal].rolling(
+      window=40, min_periods=1).min()
+    df_an.loc[index, signal + '_max'] = dfi[signal].rolling(
+      window=40, min_periods=1).max()
+
+  for i in ['h', 'v', 'a']:
+    df_an.loc[index, 'cov_acc_vel_' + i] = dfi['accel_RMS_' + i
+      ].rolling(window=20, min_periods=1).cov(dfi['vel_RMS_' + i])
+    df_an.loc[index, 'cor_acc_vel_' + i] =dfi['accel_RMS_' + i
+    ].rolling(window=20, min_periods=1).corr(dfi['vel_RMS_'+ i])
+
+
+  # Perfior 
+  from statsmodels.tsa.stattools import adfuller
+  result = adfuller(df_an['accel_RMS_h'])
+  print("ADF Statistic:", result[0])
+  print("p-value:", result[1])
+
+  #plt.plot(df.loc[index, 'accel_RMS_h'])
+  fig, ax = plt.subplots(2, 1)
+  fig.suptitle(title)
+  var = df_an.loc[index, 'accel_RMS_h']
+  var_mean = df_an.loc[index, 'accel_RMS_h_mean']
+  var_std = df_an.loc[index, 'accel_RMS_h_std']
+  var_min = df_an.loc[index, 'accel_RMS_h_min']
+  var_max = df_an.loc[index, 'accel_RMS_h_max']
+  var_corr = df_an.loc[index, 'cor_acc_vel_h']
+  z_score = (var - var_min)/(var_max - var_min)
+  ax[0].plot(var, '.')
+  ax[0].plot(var_mean)
+  ax[1].plot(z_score)
   plt.show()
 
 
-
-
-
-
-#%% ===============================================================
-# data in time domain
-# =================================================================
-for name in sensors:
-  data = sensors[name]['data']
-  max_time = sensors[name]['interval']/1000 # time in seconds
-  start = sensors[name]['start']            # start time
-
-  # get the time and save frequency sampling ----------------------
-  dt = max_time/data.shape[0]             # time sampling
-  t = np.arange(data.shape[0])*dt         # time vector
-  sensors[name]['sampling'] = 1/dt        # frequency sampling Hz
-
-  # remove gravity offset from vertical sensor and change units ---
-  data_rem = data - np.round(data.mean()) # remove g offset
-  data_rem = data_rem*g                   # change to m2/s
-
-  # plot ---------------------------------------------------------
-  fig, axs = plot_vib(data_rem, t, name=name, start=start)
+# %%

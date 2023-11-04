@@ -55,27 +55,7 @@ def plot_vib(df, haxis,  name = '', start = time.time(),
   fig.tight_layout()
   return fig, axs
 RMS = lambda x: (np.sum(x**2, axis=0)/x.shape[0])**0.5
-def find_peaks_harmonics(y, threshold, f):
-  '''function to find the peaks over the selected threshold
-  and find the harmonics in this peaks
-  '''
-  peaks = find_peaks(y, threshold)[0]   # find the peaks over threshold
-  harmonics = np.array([], dtype=int)   # store the harmonics
-  main_peaks = np.array([], dtype=int)  # store mean frequencies 
-  # after the middle of spectrum there is no possible harmonics
-  peaks_eval = peaks[peaks<(len(f)//2 + 1)] 
-  for peak in peaks_eval:
-    if np.isin(peak, harmonics): 
-      pass        # pass frequencies on the harmonics 
-    elif sum(peaks%peak==0)>1:
-      harm = peaks[peaks%peak==0]
-      print('main freq = %.2f  [Hz] presents %s harmonics'%(
-        f[peak], len(harm)
-      ))
-      harmonics = np.r_[harmonics, harm]
-      main_peaks = np.r_[main_peaks, peak]
-  return peaks, harmonics, main_peaks
-  
+
 #%% ===============================================================
 # import data
 # =================================================================
@@ -105,6 +85,7 @@ for name in sensors:
   sensors[name]['sampling'] = 1/dt        # frequency sampling Hz
 
   # remove gravity offset from vertical sensor and change units ---
+  print(np.round(data.mean()))
   data_rem = data - np.round(data.mean()) # remove g offset
   data_rem = data_rem*g                   # change to m2/s
 
@@ -137,6 +118,28 @@ for name in sensors:
 #%% ===============================================================
 # find harmonics
 # =================================================================
+def find_peaks_harmonics(y, threshold, f):
+  '''function to find the peaks index in frequency vector
+    over the selected threshold and the corresponding 
+    harmonics and mean frequency index
+  '''
+  peaks = find_peaks(y, threshold)[0]   # find the peaks over threshold
+  harmonics = np.array([], dtype=int)   # store the harmonics
+  main_peaks = np.array([], dtype=int)  # store mean frequencies 
+  # after the middle of spectrum there is no possible harmonics
+  peaks_eval = peaks[peaks<(len(f)//2 + 1)] 
+  for peak in peaks_eval:
+    if np.isin(peak, harmonics): 
+      pass        # pass frequencies on the harmonics 
+    elif sum(peaks%peak==0)>1:
+      harm = peaks[peaks%peak==0]
+      print('main freq = %.2f  [Hz] presents %s harmonics'%(
+        f[peak], len(harm)
+      ))
+      harmonics = np.r_[harmonics, harm]
+      main_peaks = np.r_[main_peaks, peak]
+  return peaks, harmonics, main_peaks
+# -------------------------------------------------------------------
 for name in sensors:
   data = sensors[name]['data']
   start = sensors[name]['start']
