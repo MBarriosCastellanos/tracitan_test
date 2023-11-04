@@ -238,6 +238,56 @@ for sensor in sensors:
     time_formated = str(datetime.timedelta(seconds=time))
     print(msg, time_formated)
 
+#%% ===============================================================
+# functions to identify changes in vibration patterns
+# =================================================================
+for sensor in sensors:
+  #def changes_patterns(df, sensor):
+  # get data
+  dfi = df[df['sensorId']==sensor].copy()
+  index = dfi.index
+
+  # filter only for uptime measurements
+  columns = ['vel_RMS', 'accel_RMS', 'model_type','rpm']
+  class_pred = clf.predict(np.array(dfi.loc[:, columns]))
+  dfi = dfi.iloc[class_pred==1, :]
+
+  # signals to analyse 
+  signals_a = ['accel_RMS_' + i for i in ['h', 'v', 'a']]
+  signals_v = ['vel_RMS_' + i for i in ['h', 'v', 'a']] 
+  signals = signals_a + signals_v
+
+  # add the moving average and standard deviation 
+  for signal in signals:
+    dfi.loc[:, signal + '_mean'] = dfi[signal].rolling(
+      window=20, min_periods=0).mean()
+    dfi.loc[:, signal + '_std'] = dfi[signal].rolling(
+      window=20, min_periods=0).std()
+
+  # add pearson correlation between acceleration and velocity 
+  for i in ['h', 'v', 'a']:
+    dfi.loc[:, 'cor_accel_vel_' + i] = np.abs(
+      dfi['accel_RMS_' + i].rolling(
+        window=20, min_periods=1).corr(dfi['vel_RMS_'+ i]))
+
+  # identify soft and hard changes in behavior
+  dfi.loc[:, ['soft', 'hard', 'outliers']] = 0
+  for signal in signals:
+    mean = dfi.loc[:, signal + '_mean']
+    std = dfi.loc[:, signal + '_std']
+    x = dfi.loc[:, signal] 
+    dfi.loc[:, 'soft'] += 1*(x > (mean + 2*std))  # soft changes in behavior
+    dfi.loc[:, 'hard'] += 1*(x > (mean + 3*std))  # hard changes in behavior
+
+  # identify outliers in transformer, motors and centrifugal pumps
+  if np.isin(dfi['model_type'].mean(), [1, 4, 5]):
+    for i in ['h', 'v', 'a']:   
+      if dfi['model_type'].mean()==4 and dfi['power'].mean()>0:
+        pass
+      else:
+        dfi.loc[:, 'outliers'] += 1*(dfi.loc[:,'cor_accel_vel_' + i]  <0.9)
+
+  plt.plot(dfi['outliers']); plt.show()
 
 #%% ===============================================================
 # add moving to predict changes in vibration patterns
@@ -248,50 +298,64 @@ signals_v = ['vel_RMS_' + i for i in ['h', 'v', 'a']]
 signals = signals_a + signals_v
 signals
 df_an = df[df['class']==1].copy()
+#df_an = df.copy()
 for j, sensor in enumerate(sensors):
   # define data of each sensor ------------------------------------
   dfi = df_an[df_an['sensorId']==sensor].copy()
   index = dfi.index
-  title = '%s, %s'%(
-    assets['name'][sensor], assets['modelType'][sensor])
+  title = '%s, %s, %s rpm, %s kw'%(
+    assets['name'][sensor], assets['modelType'][sensor],
+    assets['specifications.rpm'][sensor],
+    assets['specifications.power'][sensor])
 
   # ----
   for signal in signals:
     df_an.loc[index, signal + '_mean'] = dfi[signal].rolling(
-      window=40, min_periods=1).mean()
+      window=20, min_periods=1).mean()
     df_an.loc[index, signal + '_std'] = dfi[signal].rolling(
-      window=40, min_periods=1).std()
+      window=20, min_periods=1).std()
     df_an.loc[index, signal + '_min'] = dfi[signal].rolling(
-      window=40, min_periods=1).min()
+      window=20, min_periods=1).min()
     df_an.loc[index, signal + '_max'] = dfi[signal].rolling(
-      window=40, min_periods=1).max()
+      window=20, min_periods=1).max()
 
   for i in ['h', 'v', 'a']:
-    df_an.loc[index, 'cov_acc_vel_' + i] = dfi['accel_RMS_' + i
+    df_an.loc[index, 'cov_accel_vel_' + i] = dfi['accel_RMS_' + i
       ].rolling(window=20, min_periods=1).cov(dfi['vel_RMS_' + i])
-    df_an.loc[index, 'cor_acc_vel_' + i] =dfi['accel_RMS_' + i
-    ].rolling(window=20, min_periods=1).corr(dfi['vel_RMS_'+ i])
+    df_an.loc[index, 'cor_accel_vel_' + i] = np.abs(dfi['accel_RMS_' + i
+    ].rolling(window=20, min_periods=1).corr(dfi['vel_RMS_'+ i]))
 
 
-  # Perfior 
-  from statsmodels.tsa.stattools import adfuller
-  result = adfuller(df_an['accel_RMS_h'])
-  print("ADF Statistic:", result[0])
-  print("p-value:", result[1])
 
   #plt.plot(df.loc[index, 'accel_RMS_h'])
-  fig, ax = plt.subplots(2, 1)
+  fig, ax = plt.subplots(3, 1)
   fig.suptitle(title)
-  var = df_an.loc[index, 'accel_RMS_h']
-  var_mean = df_an.loc[index, 'accel_RMS_h_mean']
-  var_std = df_an.loc[index, 'accel_RMS_h_std']
-  var_min = df_an.loc[index, 'accel_RMS_h_min']
-  var_max = df_an.loc[index, 'accel_RMS_h_max']
-  var_corr = df_an.loc[index, 'cor_acc_vel_h']
+  x = np.arange(0, len(dfi)) 
+  var =      np.array(df_an.loc[index, 'vel_RMS_a'])
+  var2 =     np.array(df_an.loc[index, 'accel_RMS_a'])
+  var_mean = np.array(df_an.loc[index, 'vel_RMS_a_mean'])
+  var_std =  np.array(df_an.loc[index, 'vel_RMS_a_std'])
+  var_min =  np.array(df_an.loc[index, 'vel_RMS_a_min'])
+  var_max =  np.array(df_an.loc[index, 'vel_RMS_a_max'])
+  var_corr = np.array(df_an.loc[index, 'cor_accel_vel_a'])
+  var_cov =  np.array(df_an.loc[index, 'cov_accel_vel_a'])
   z_score = (var - var_min)/(var_max - var_min)
-  ax[0].plot(var, '.')
-  ax[0].plot(var_mean)
-  ax[1].plot(z_score)
+  #ax[0].plot(df_an.loc[index, 'accel_RMS_h'],df_an.loc[index, 'vel_RMS_h'], '.')
+  ax[0].plot(x, var, '.-')
+  ax[0].plot(x, var_mean)
+  sel = var_corr<0.9
+  ax[0].plot(x, var_mean + 3*var_std)
+  ax[0].plot(x[sel], var[sel] , 'x', color='r' )
+  #ax[0].set_yscale('log')
+  #ax[1].set_yscale('log')
+  #ax[1].plot(var_cov, '.')
+  #ax[1].hlines([2e-6], index.min(), index.max(), color='r')
+  #ax[1].plot(x, np.gradient(var), '.')
+  ax[1].plot(var/var.max(), var2/var2.max(), '.')
+  ax[1].plot(var[sel]/var.max(), var2[sel]/var2.max(), 'x', color='r')
+  ax[2].plot(var_corr)
+  ax[2].hlines([0.9], 0, x.max(), color='r', linestyle='--')
+  #ax[1].plot(var_std*var_std, '.')
   plt.show()
 
 
