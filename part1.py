@@ -43,12 +43,13 @@ def plot_vib(df, haxis,  name = '', start = time.time(),
     min_df = 0
 
   # plot ---------------------------------------------------------
-  fig, axs = plt.subplots(df.shape[1], 1, sharex=True)
+  fig, axs = plt.subplots(df.shape[1], 1, sharex=True,
+    figsize=(7,7))
   fig.suptitle('sensor %s, on %s'%(name, date_time))
   for ax, col in zip(axs, df.columns):
     vib = np.array(df[col])
     ax.plot(haxis, vib, color='k', )
-    ax.set_ylabel('%s [$\\mathrm{m^2/s}$]'%(col))
+    ax.set_ylabel('%s [$\\mathrm{m/s^2}$]'%(col))
     ax.set_xlim(haxis.min(), haxis.max())
     ax.set_ylim(min_df, max_df)
   ax.set_xlabel(xlabel)
@@ -87,7 +88,7 @@ for name in sensors:
   # remove gravity offset from vertical sensor and change units ---
   print(np.round(data.mean()))
   data_rem = data - np.round(data.mean()) # remove g offset
-  data_rem = data_rem*g                   # change to m2/s
+  data_rem = data_rem*g                   # change to m/s2
 
   # plot ---------------------------------------------------------
   fig, axs = plot_vib(data_rem, t, name=name, start=start)
@@ -119,25 +120,43 @@ for name in sensors:
 # find harmonics
 # =================================================================
 def find_peaks_harmonics(y, threshold, f):
-  '''function to find the peaks index in frequency vector
-    over the selected threshold and the corresponding 
-    harmonics and mean frequency index
+  ''''
+  Function to find the indices of peaks in the frequency vector
+  above the specified threshold and their corresponding harmonics,\
+     if any.
+
+  Parameters:
+    y: The frequency spectrum to be analyzed.
+    threshold: The threshold used to identify peaks.
+    f: The frequency vector corresponding to the spectrum.
+
+  Returns:
+    peaks: List of indices of peaks.
+    harmonics: List of indices of harmonics.
+    main_peaks: List of indices of main frequencies.
   '''
-  peaks = find_peaks(y, threshold)[0]   # find the peaks over threshold
+   # Find peaks in the spectrum above the threshold
+  peaks = find_peaks(y, threshold)[0]   
+
+  # Initialize lists to store harmonics and main frequencies
   harmonics = np.array([], dtype=int)   # store the harmonics
   main_peaks = np.array([], dtype=int)  # store mean frequencies 
+  
+  # Iterate through peaks to identify harmonics
   # after the middle of spectrum there is no possible harmonics
   peaks_eval = peaks[peaks<(len(f)//2 + 1)] 
   for peak in peaks_eval:
     if np.isin(peak, harmonics): 
-      pass        # pass frequencies on the harmonics 
+      continue # Ignore frequencies that are already in harmonics 
     elif sum(peaks%peak==0)>1:
+      # Check if there is more than one peak in the spectrum 
+      #   that is a multiple of the current peak
       harm = peaks[peaks%peak==0]
       print('main freq = %.2f  [Hz] presents %s harmonics'%(
         f[peak], len(harm)
       ))
-      harmonics = np.r_[harmonics, harm]
-      main_peaks = np.r_[main_peaks, peak]
+      harmonics = np.r_[harmonics, harm] # Store harmonics in the list
+      main_peaks = np.r_[main_peaks, peak] # Store the main frequency
   return peaks, harmonics, main_peaks
 # -------------------------------------------------------------------
 for name in sensors:

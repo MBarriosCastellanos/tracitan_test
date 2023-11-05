@@ -8,14 +8,7 @@ import os                             # files sort
 import glob                           # glob
 import datetime                       # process timestamp
 import time                           # time                       
-from scipy.fft import   fft, fftfreq  # function fo fast fourier
-from scipy.constants import g         # gravity constant
-from scipy.signal import find_peaks, windows  # signar processsing
 import seaborn as sns
-
-#%% ===============================================================
-# functions
-# =================================================================
 
 #%% ===============================================================
 # import data
@@ -89,7 +82,7 @@ for sensor in sensors:
   t =np.array(dfi['time_start'])
   lab1 = [ 'acceleration', 'velocity']
   lab2 = [ 'horizontal', 'vertical', 'axial']
-  fig, axs = plt.subplots(4, 1, sharex=True)
+  fig, axs = plt.subplots(4, 1, sharex=True, figsize=(7,7))
   ax2 = [0, 0, 0]
   fig.suptitle(assets['name'][sensor])
   for j, d in enumerate(directions):
@@ -127,27 +120,34 @@ for j, sensor in enumerate(sensors):
   df.loc[index, 'class'] = 0*(vib_acel<th) + 1*(vib_acel>th)
 
   # plot the view of classification -------------------------------
-  fig, axs = plt.subplots(4, 1, figsize=(6, 10))
+  fig, axs = plt.subplots(4, 1, figsize=(7, 10))
   ax_0 = list(axs)
   ax_1 = [0, 0, 0]
   fig.suptitle(title)
 
   # axis 0 a 2 
   labels = ['accel_RMS', 'vel_RMS', 'dt']
+  lab = ['downtime', 'uptime']
   for i in range(3):
     ax_1[i] = ax_0[i].twinx()
-    sns.scatterplot(dfi, alpha=0.4,
+    sns.scatterplot(dfi, alpha=0.4, 
       x=labels[i], y='time_start', hue='class', ax =ax_0[i])
     sns.kdeplot(dfi[labels[i]], ax =ax_1[i], color='k')
     #if i<2:
     ax_1[i].set_xscale('log')
+    ax_0[i].legend(loc='upper right')
   ax_0[2].vlines(1e4,dfi['time_start'].min(), 
     dfi['time_start'].max(), color='r')
   
   # axis 3
   for Class, color  in enumerate(['r', 'k']):
-    ax_0[3].plot(dfi.time_start[dfi['class']==Class], 
-      dfi.accel_RMS[dfi['class']==Class],'--', color=color)
+    t = dfi.time_start
+    t = t[dfi['class']==Class] - t.min()
+    ax_0[3].plot(t/3600, dfi.accel_RMS[dfi['class']==Class],'--', 
+      color=color,  label=lab[Class])
+  ax_0[3].set_xlabel('time [h]')
+  ax_0[3].set_ylabel('accel_RMS')
+  ax_0[3].legend(loc='upper right')
   fig.tight_layout()
   
 #%% ===============================================================
@@ -198,29 +198,46 @@ plt.xlabel('Predicted');  plt.ylabel('Actual'); plt.show()
 # function to predict downtime and uptime
 # =================================================================
 def calculate_dw_up(df, sensor):
-  '''calculate the downtime and uptime in dataframe df for the 
-  equipment measured by the sensor  
+  '''
+    Calculate the downtime and uptime in DataFrame 'df' for \
+      the equipment measured by the sensor.
+
+    Parameters:
+    - df: DataFrame containing sensor data.
+    - sensor: Sensor identifier for which downtime and uptime \
+      are calculated.
+
+    Returns:
+    - Downtime and uptime in seconds, and the total time span \
+      of measurements.
   '''
   # get delta times between vibration measurement 
   dfi = df[df['sensorId']==sensor].copy() # select sensor data
+
+  # sorts the data by the 'time_start' column to ensure chronological order.
   dfi = dfi.sort_values(by='time_start').copy() # ensure order
+
+  # computes the time intervals between consecutive vibration measurements.
   dtimes = np.array(dfi.time_start[1:]    # get delta times
     ) - np.array(dfi.time_start[:-1])
   last_dt = df['duration'].iloc[-1]       # add dtime last 
   dtimes = np.r_[dtimes,  last_dt]        #     measurement
 
   # predict downtime or uptime in each measurement 
+  #   using a machine learning classifier 'clf'.
   columns = ['vel_RMS', 'accel_RMS', 'model_type','rpm']
   class_pred = clf.predict(np.array(dfi.loc[:, columns]))
 
-  # calculate the operation time, downtime, and uptime in seconds 
+  # Calculates the total time span of measurements, 
+  #   uptime in seconds, and downtime in seconds.
   total_time = dfi.time_start.max() - dfi.time_start.min() + last_dt
   uptime   = np.sum(dtimes*(class_pred==1))
   downtime = np.sum(dtimes*(class_pred==0))
   return downtime, uptime, total_time
-# -----------------------------------------------------------------
+
+#%% ===============================================================
 # predict times for each machine
-# -----------------------------------------------------------------
+# =================================================================
 msgs = ['total operation time = ', 'downtime = ', 'uptime = ']
 for sensor in sensors:
   # define data of each sensor 
@@ -241,122 +258,131 @@ for sensor in sensors:
 #%% ===============================================================
 # functions to identify changes in vibration patterns
 # =================================================================
-for sensor in sensors:
-  #def changes_patterns(df, sensor):
-  # get data
-  dfi = df[df['sensorId']==sensor].copy()
+def changes_patterns(df, sensor):
+  """
+  Analyzes sensor data to identify changes in behavior and outliers.
+
+  Parameters:
+  - df: DataFrame containing sensor data.
+  - sensor: Sensor identifier for which the analysis is performed.
+
+  Returns:
+  - A DataFrame 'changes' with information about soft changes,\
+    hard changes, and outliers.
+
+  """
+  # Get data for the specified sensor from the DataFrame
+  dfi = df[df['sensorId'] == sensor].copy()
   index = dfi.index
 
-  # filter only for uptime measurements
-  columns = ['vel_RMS', 'accel_RMS', 'model_type','rpm']
+  # Filter the data for uptime measurements using 
+  #   a machine learning classifier (clf)
+  columns = ['vel_RMS', 'accel_RMS', 'model_type', 'rpm']
   class_pred = clf.predict(np.array(dfi.loc[:, columns]))
-  dfi = dfi.iloc[class_pred==1, :]
+  dfi = dfi.iloc[class_pred == 1, :]
+  index_pred = index[class_pred == 1]
 
-  # signals to analyse 
+  # Define signals of interest for analysis
   signals_a = ['accel_RMS_' + i for i in ['h', 'v', 'a']]
-  signals_v = ['vel_RMS_' + i for i in ['h', 'v', 'a']] 
+  signals_v = ['vel_RMS_' + i for i in ['h', 'v', 'a']]
   signals = signals_a + signals_v
 
-  # add the moving average and standard deviation 
+  # Add moving average and standard deviation for selected signals
   for signal in signals:
     dfi.loc[:, signal + '_mean'] = dfi[signal].rolling(
       window=20, min_periods=0).mean()
     dfi.loc[:, signal + '_std'] = dfi[signal].rolling(
       window=20, min_periods=0).std()
 
-  # add pearson correlation between acceleration and velocity 
+  # Calculate Pearson correlation between acceleration and 
+  #   velocity for each axis (h, v, a)
   for i in ['h', 'v', 'a']:
     dfi.loc[:, 'cor_accel_vel_' + i] = np.abs(
       dfi['accel_RMS_' + i].rolling(
-        window=20, min_periods=1).corr(dfi['vel_RMS_'+ i]))
+        window=20, min_periods=1).corr(dfi['vel_RMS_' + i]))
 
-  # identify soft and hard changes in behavior
-  dfi.loc[:, ['soft', 'hard', 'outliers']] = 0
+  # Identify soft and hard changes in behavior for the selected signals
+  changes = pd.DataFrame(
+    index=index, columns=['soft', 'hard', 'outliers'])
+  changes.loc[:, :] = 0
   for signal in signals:
     mean = dfi.loc[:, signal + '_mean']
     std = dfi.loc[:, signal + '_std']
-    x = dfi.loc[:, signal] 
-    dfi.loc[:, 'soft'] += 1*(x > (mean + 2*std))  # soft changes in behavior
-    dfi.loc[:, 'hard'] += 1*(x > (mean + 3*std))  # hard changes in behavior
+    x = dfi.loc[:, signal]
+    changes.loc[index_pred, 'soft'] += 1 * (
+      x > (mean + 2 * std))  # Identify soft changes in behavior
+    changes.loc[index_pred, 'hard'] += 1 * (
+      x > (mean + 3 * std))  # Identify hard changes in behavior
 
-  # identify outliers in transformer, motors and centrifugal pumps
+  # Identify outliers in transformer, motors, and centrifugal 
+  #   pumps based on model_type and correlation
   if np.isin(dfi['model_type'].mean(), [1, 4, 5]):
     for i in ['h', 'v', 'a']:   
-      if dfi['model_type'].mean()==4 and dfi['power'].mean()>0:
+      if dfi['power'].mean()>20 and dfi['model_type'].mean()==4:
         pass
       else:
-        dfi.loc[:, 'outliers'] += 1*(dfi.loc[:,'cor_accel_vel_' + i]  <0.9)
-
-  plt.plot(dfi['outliers']); plt.show()
-
+        changes.loc[index_pred, 'outliers'] += 1 * (
+          dfi.loc[:, 'cor_accel_vel_' + i] < 0.9)
+    
+  return changes
+  
 #%% ===============================================================
-# add moving to predict changes in vibration patterns
+# test function in fault prediction
 # =================================================================
-# add mean average for each vibration signal:
-signals_a = ['accel_RMS_' + i for i in ['h', 'v', 'a']]
-signals_v = ['vel_RMS_' + i for i in ['h', 'v', 'a']]
-signals = signals_a + signals_v
-signals
-df_an = df[df['class']==1].copy()
-#df_an = df.copy()
 for j, sensor in enumerate(sensors):
+
   # define data of each sensor ------------------------------------
-  dfi = df_an[df_an['sensorId']==sensor].copy()
-  index = dfi.index
   title = '%s, %s, %s rpm, %s kw'%(
     assets['name'][sensor], assets['modelType'][sensor],
     assets['specifications.rpm'][sensor],
     assets['specifications.power'][sensor])
+  
+  # identify changes in sensor -------------------------------------
+  changes = changes_patterns(df, sensor)
 
-  # ----
-  for signal in signals:
-    df_an.loc[index, signal + '_mean'] = dfi[signal].rolling(
-      window=20, min_periods=1).mean()
-    df_an.loc[index, signal + '_std'] = dfi[signal].rolling(
-      window=20, min_periods=1).std()
-    df_an.loc[index, signal + '_min'] = dfi[signal].rolling(
-      window=20, min_periods=1).min()
-    df_an.loc[index, signal + '_max'] = dfi[signal].rolling(
-      window=20, min_periods=1).max()
+  # Get data for the specified sensor from the DataFrame -----------
+  dfi = df[df['sensorId'] == sensor].copy()
+  index = dfi.index
 
-  for i in ['h', 'v', 'a']:
-    df_an.loc[index, 'cov_accel_vel_' + i] = dfi['accel_RMS_' + i
-      ].rolling(window=20, min_periods=1).cov(dfi['vel_RMS_' + i])
-    df_an.loc[index, 'cor_accel_vel_' + i] = np.abs(dfi['accel_RMS_' + i
-    ].rolling(window=20, min_periods=1).corr(dfi['vel_RMS_'+ i]))
+  # Filter the data for uptime measurements using 
+  #   a machine learning classifier (clf) -------------------------
+  columns = ['vel_RMS', 'accel_RMS', 'model_type', 'rpm']
+  class_pred = clf.predict(np.array(dfi.loc[:, columns]))
+  dfi = dfi.iloc[class_pred == 1, :]
+  index_pred = index[class_pred == 1]
 
+  # fault identification -------------------------------------------
+  t = dfi.loc[index_pred, 'time_start']
+  t = np.arange(len(t))
+  soft = changes.loc[index_pred, 'soft']>2
+  hard = changes.loc[index_pred, 'hard']>0
+  outliers = changes.loc[index_pred, 'outliers']>2
 
-
-  #plt.plot(df.loc[index, 'accel_RMS_h'])
-  fig, ax = plt.subplots(3, 1)
+  # plot ----------------------------------------------------------
+  fig, ax = plt.subplots(3, 1, figsize=(7,7), sharex=True)
   fig.suptitle(title)
-  x = np.arange(0, len(dfi)) 
-  var =      np.array(df_an.loc[index, 'vel_RMS_a'])
-  var2 =     np.array(df_an.loc[index, 'accel_RMS_a'])
-  var_mean = np.array(df_an.loc[index, 'vel_RMS_a_mean'])
-  var_std =  np.array(df_an.loc[index, 'vel_RMS_a_std'])
-  var_min =  np.array(df_an.loc[index, 'vel_RMS_a_min'])
-  var_max =  np.array(df_an.loc[index, 'vel_RMS_a_max'])
-  var_corr = np.array(df_an.loc[index, 'cor_accel_vel_a'])
-  var_cov =  np.array(df_an.loc[index, 'cov_accel_vel_a'])
-  z_score = (var - var_min)/(var_max - var_min)
-  #ax[0].plot(df_an.loc[index, 'accel_RMS_h'],df_an.loc[index, 'vel_RMS_h'], '.')
-  ax[0].plot(x, var, '.-')
-  ax[0].plot(x, var_mean)
-  sel = var_corr<0.9
-  ax[0].plot(x, var_mean + 3*var_std)
-  ax[0].plot(x[sel], var[sel] , 'x', color='r' )
-  #ax[0].set_yscale('log')
-  #ax[1].set_yscale('log')
-  #ax[1].plot(var_cov, '.')
-  #ax[1].hlines([2e-6], index.min(), index.max(), color='r')
-  #ax[1].plot(x, np.gradient(var), '.')
-  ax[1].plot(var/var.max(), var2/var2.max(), '.')
-  ax[1].plot(var[sel]/var.max(), var2[sel]/var2.max(), 'x', color='r')
-  ax[2].plot(var_corr)
-  ax[2].hlines([0.9], 0, x.max(), color='r', linestyle='--')
-  #ax[1].plot(var_std*var_std, '.')
-  plt.show()
-
+  for j, signal in enumerate(['accel_RMS_' + i for i in ['h', 'v', 'a']]):
+    x = np.array(dfi.loc[index_pred, signal])
+    x_mean = np.array(
+      dfi[signal].rolling(window=20, min_periods=0).mean())
+    x_std = np.array(
+      dfi[signal].rolling(window=20, min_periods=0).std())
+    ax[j].fill_between(t, x_mean - 3*x_std, x_mean + 3*x_std,
+      color=(0.2, 0, 0), alpha=0.3, label='mean + 3 std')
+    ax[j].plot(t, x, '.-', color=(0.2, 0.2, 0.2), label='data')
+    ax[j].plot(t, x_mean, '--', color='g', label='movil mean')
+    ax[j].plot(t[soft], x_mean[soft], '.', color='r', markersize=5,
+      label='damage')
+    ax[j].plot(t[hard], x[hard], 'x', color='r', markersize=10,
+      label='faults')
+    ax[j].plot(t[outliers], x[outliers], '+', color='b', 
+      markersize=10, label='outlier behavior')
+    ax[j].set_ylabel(signal)
+    ax[j].set_ylim(np.nanmin(x - 3*x_std), 
+                   np.nanmax(x + 3*x_std))
+  ax[j].set_xlabel('measurements')
+  ax[j].set_xlim(t.min(), t.max())
+  ax[j].legend(loc='upper center', bbox_to_anchor=(0.5, -0.3), ncol=4)
+  fig.tight_layout()
 
 # %%
